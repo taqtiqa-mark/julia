@@ -289,6 +289,8 @@ JL_DLLEXPORT void (jl_gc_safepoint)(void);
 
 JL_DLLEXPORT void jl_gc_enable_finalizers(jl_ptls_t ptls, int on);
 
+JL_DLLEXPORT void jl_wakeup_thread(int16_t tid);
+
 #ifdef __cplusplus
 }
 #endif

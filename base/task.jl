@@ -560,29 +560,11 @@ function trypoptask(W::StickyWorkqueue)
 end
 
 @noinline function poptaskref(W::StickyWorkqueue)
-    gettask = () -> trypoptask(W)
-    task = ccall(:jl_task_get_next, Any, (Any,), gettask)
-    ## Below is a reference implementation for `jl_task_get_next`, which currently lives in C
-    #local task
-    #while true
-    #    task = trypoptask(W)
-    #    task === nothing || break
-    #    if !Threads.in_threaded_loop[] && Threads.threadid() == 1
-    #        if process_events(true) == 0
-    #            task = trypoptask(W)
-    #            task === nothing || break
-    #            # if there are no active handles and no runnable tasks, just
-    #            # wait for signals.
-    #            pause()
-    #        end
-    #    else
-    #        if Threads.threadid() == 1
-    #            process_events(false)
-    #        end
-    #        ccall(:jl_gc_safepoint, Cvoid, ())
-    #        ccall(:jl_cpu_pause, Cvoid, ())
-    #    end
-    #end
+    task = trypoptask(W)
+    if !(task isa Task)
+        gettask = () -> trypoptask(W)
+        task = ccall(:jl_task_get_next, Any, (Any,), gettask)::Task
+    end
     return Ref(task)
 end
 
