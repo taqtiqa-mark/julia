@@ -54,10 +54,10 @@ typedef struct thread_sleep_tag {
 
 static thread_sleep_t **all_sleep_states;
 
-static const int16_t not_sleeping = 0; // no thread should be sleeping
-static const int16_t checking_for_sleeping = 1; // some threads are deciding if it is safe to transition to sleeping
-static const int16_t sleeping = 2; // it is acceptable for a thread to be sleeping
-static int16_t sleep_check_state;
+static const int16_t not_sleeping = 0; // no thread should be sleeping--there might be work in the multi-queue
+static const int16_t checking_for_sleeping = 1; // some threads are checking the multi-queue to see if it is safe to transition to sleeping
+static const int16_t sleeping = 2; // it is acceptable for a thread to be sleeping if it's sticky queue is empty
+static int16_t sleep_check_state; // status of the multi-queue
 
 uint64_t sleep_threshold;
 
@@ -331,26 +331,36 @@ static void wake_thread(jl_ptls_t ptls, int16_t tid)
     }
 }
 
-
+/* ensure thread tid is awake if necessary */
 JL_DLLEXPORT void jl_wakeup_thread(int16_t tid)
 {
     jl_ptls_t ptls = jl_get_ptls_states();
-
-    /* ensure thread tid is awake if necessary */
-    if (tid != ptls->tid) {
-        int16_t state = jl_atomic_exchange(&sleep_check_state, not_sleeping);
-        if (sleep_threshold && state != not_sleeping) {
-            // TODO: wake only thread tid
-            for (tid = 0; tid < jl_n_threads; tid++)
+    int16_t uvlock = jl_atomic_load_acquire(&jl_uv_mutex.owner);
+    if (tid == ptls->tid) {
+        // we're already awake, but make sure we'll exit uv_run
+        if (uvlock == ptls->tid)
+            uv_stop(jl_global_event_loop());
+    }
+    else {
+        // check if the other threads might be sleeping
+        if (jl_atomic_load_acquire(&sleep_check_state) != not_sleeping && sleep_threshold) {
+            if (tid == -1) {
+                // something added to the multi-queue: notify all threads
+                int16_t state = jl_atomic_exchange(&sleep_check_state, not_sleeping);
+                if (state != not_sleeping) {
+                    for (tid = 0; tid < jl_n_threads; tid++)
+                        wake_thread(ptls, tid);
+                }
+            }
+            else {
+                // something added to the sticky-queue: notify that thread
                 wake_thread(ptls, tid);
+            }
+            // check if we need to notify uv_run too
+            if (uvlock != ptls->tid)
+                jl_wake_libuv();
         }
     }
-
-    /* stop the event loop too */
-    if (jl_uv_mutex.owner != jl_thread_self())
-        jl_wake_libuv();
-    else
-        uv_stop(jl_global_event_loop());
 }
 
 
@@ -404,34 +414,48 @@ JL_DLLEXPORT jl_task_t *jl_task_get_next(jl_value_t *getsticky)
             task = get_next_task(getsticky);
             if (task)
                 return task;
+            // one thread should win this race and watch the event loop
             if (jl_mutex_trylock(&jl_uv_mutex)) {
-                // one thread should win this race and watch the event loop
-                uv_loop_t *loop = uv_default_loop();
-                loop->stop_flag = 0;
-                uv_run(loop, UV_RUN_ONCE);
-                JL_UV_UNLOCK();
-                task = get_next_task(getsticky);
-                if (task)
-                    return task;
-                if (jl_atomic_load(&sleep_check_state) != sleeping) {
-                    start_cycles = 0;
-                    continue;
+                if (jl_atomic_load(&jl_uv_n_waiters) != 0) {
+                    // but if we won the race against someone who actually needs
+                    // the lock, we need to let them have it instead
+                    JL_UV_UNLOCK();
                 }
-                // otherwise, we got a spurious wakeup since some other
-                // thread just wanted to steal libuv from us,
-                // just go right back to sleep on the other wake signal
-                // to let them take it from us without conflict
+                else {
+                    uv_loop_t *loop = jl_global_event_loop();
+                    loop->stop_flag = 0;
+                    uv_run(loop, UV_RUN_ONCE);
+                    JL_UV_UNLOCK();
+                    // optimization: check again first if we added work for ourself
+                    task = get_next_task(getsticky);
+                    if (task)
+                        return task;
+                    // or someone else might have
+                    if (jl_atomic_load(&sleep_check_state) != sleeping) {
+                        start_cycles = 0;
+                        continue;
+                    }
+                    // otherwise, we got a spurious wakeup since some other
+                    // thread just wanted to steal libuv from us,
+                    // just go right back to sleep on the other wake signal
+                    // to let them take it from us without conflict
+                }
             }
             // the other threads will just wait for on signal to resume
             thread_sleep_t *on = all_sleep_states[ptls->tid];
             int8_t gc_state = jl_gc_safe_enter(ptls);
             uv_mutex_lock(&on->sleep_lock);
             while (jl_atomic_load(&sleep_check_state) == sleeping) {
+                task = get_next_task(getsticky);
+                if (task)
+                    break;
                 uv_cond_wait(&on->wake_signal, &on->sleep_lock);
             }
             uv_mutex_unlock(&on->sleep_lock);
             jl_gc_safe_leave(ptls, gc_state);
             start_cycles = 0;
+            if (task)
+                return task;
         }
     }
 }
