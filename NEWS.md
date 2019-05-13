@@ -30,7 +30,7 @@ Standard library changes
 
 * `diagm` and `spdiagm` now accept optional `m,n` initial arguments to specify a size ([#31654]).
 
-* `Hessenberg` factorizations `H` now support efficient shifted solves `(H+µI) \ b` and related operations, does a specialized tridiagonal factorization for Hermitian matrices, and there is also a new `UpperHessenberg` matrix type ([#31853]).
+* `Hessenberg` factorizations `H` now support efficient shifted solves `(H+µI) \ b` and determinants, and use a specialized tridiagonal factorization for Hermitian matrices. There is also a new `UpperHessenberg` matrix type ([#31853]).
 
 #### SparseArrays
 
