@@ -156,7 +156,7 @@ struct _jl_tls_states_t {
     int8_t disable_gc;
     volatile sig_atomic_t defer_signal;
     struct _jl_task_t *current_task;
-    struct _jl_task_t *previous_task;
+    void *placeholder;
     struct _jl_task_t *root_task;
     void *stackbase;
     size_t stacksize;

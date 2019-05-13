@@ -404,28 +404,23 @@ JL_DLLEXPORT jl_task_t *jl_task_get_next(jl_value_t *getsticky)
             task = get_next_task(getsticky);
             if (task)
                 return task;
-            if (_threadedregion) {
-                if (jl_mutex_trylock(&jl_uv_mutex)) {
-                    // one thread should win this race and watch the event loop
-                    uv_loop_t *loop = uv_default_loop();
-                    loop->stop_flag = 0;
-                    uv_run(loop, UV_RUN_ONCE);
-                    JL_UV_UNLOCK();
-                    if (jl_atomic_load(&sleep_check_state) != sleeping) {
-                        start_cycles = 0;
-                        continue;
-                    }
-                    // otherwise, we got a spurious wakeup since some other
-                    // thread just wanted to steal libuv from us,
-                    // just go right back to sleep on the other wake signal
-                    // to let them take it from us without conflict
-                }
-            }
-            else {
-                if (ptls->tid == 0) {
-                    jl_run_once(jl_global_event_loop());
+            if (jl_mutex_trylock(&jl_uv_mutex)) {
+                // one thread should win this race and watch the event loop
+                uv_loop_t *loop = uv_default_loop();
+                loop->stop_flag = 0;
+                uv_run(loop, UV_RUN_ONCE);
+                JL_UV_UNLOCK();
+                task = get_next_task(getsticky);
+                if (task)
+                    return task;
+                if (jl_atomic_load(&sleep_check_state) != sleeping) {
+                    start_cycles = 0;
                     continue;
                 }
+                // otherwise, we got a spurious wakeup since some other
+                // thread just wanted to steal libuv from us,
+                // just go right back to sleep on the other wake signal
+                // to let them take it from us without conflict
             }
             // the other threads will just wait for on signal to resume
             thread_sleep_t *on = all_sleep_states[ptls->tid];

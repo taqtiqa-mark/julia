@@ -473,8 +473,6 @@ void jl_start_threads(void)
 
 #endif
 
-unsigned volatile _threadedregion; // HACK: prevent the root task from sleeping
-
 // simple fork/join mode code
 JL_DLLEXPORT void jl_threading_run(jl_value_t *func)
 {
@@ -493,7 +491,6 @@ JL_DLLEXPORT void jl_threading_run(jl_value_t *func)
     jl_value_t *wait_func = jl_get_global(jl_base_module, jl_symbol("wait"));
     jl_value_t *schd_func = jl_get_global(jl_base_module, jl_symbol("schedule"));
     // create and schedule all tasks
-    _threadedregion += 1;
     for (int i = 0; i < nthreads; i++) {
         jl_value_t *args2[2];
         args2[0] = (jl_value_t*)jl_task_type;
@@ -523,13 +520,11 @@ JL_DLLEXPORT void jl_threading_run(jl_value_t *func)
         }
     }
     JL_CATCH {
-        _threadedregion -= 1;
         jl_wake_libuv();
         JL_UV_LOCK();
         JL_UV_UNLOCK();
         jl_rethrow();
     }
-    _threadedregion -= 1;
     // make sure no threads are sitting in the event loop
     jl_wake_libuv();
     // make sure no more callbacks will run while user code continues
