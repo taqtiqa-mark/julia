@@ -160,11 +160,11 @@ isless(x::AbstractFloat, y::Real         ) = (!isnan(x) & (isnan(y) | signless(x
 
 function ==(T::Type, S::Type)
     @_pure_meta
-    T<:S && S<:T
+    return ccall(:jl_types_equal, Cint, (Any, Any), T, S) != 0
 end
 function !=(T::Type, S::Type)
     @_pure_meta
-    !(T == S)
+    return !(T == S)
 end
 ==(T::TypeVar, S::Type) = false
 ==(T::Type, S::TypeVar) = false
@@ -682,40 +682,6 @@ function >>>(x::Integer, c::Unsigned)
 end
 >>>(x::Integer, c::Int) = c >= 0 ? x >>> unsigned(c) : x << unsigned(-c)
 
-# fallback div, fld, and cld implementations
-# NOTE: C89 fmod() and x87 FPREM implicitly provide truncating float division,
-# so it is used here as the basis of float div().
-div(x::T, y::T) where {T<:Real} = convert(T,round((x-rem(x,y))/y))
-
-"""
-    fld(x, y)
-
-Largest integer less than or equal to `x/y`.
-
-# Examples
-```jldoctest
-julia> fld(7.3,5.5)
-1.0
-```
-"""
-fld(x::T, y::T) where {T<:Real} = convert(T,round((x-mod(x,y))/y))
-
-"""
-    cld(x, y)
-
-Smallest integer larger than or equal to `x/y`.
-
-# Examples
-```jldoctest
-julia> cld(5.5,2.2)
-3.0
-```
-"""
-cld(x::T, y::T) where {T<:Real} = convert(T,round((x-modCeil(x,y))/y))
-#rem(x::T, y::T) where {T<:Real} = convert(T,x-y*trunc(x/y))
-#mod(x::T, y::T) where {T<:Real} = convert(T,x-y*floor(x/y))
-modCeil(x::T, y::T) where {T<:Real} = convert(T,x-y*ceil(x/y))
-
 # operator alias
 
 """
@@ -1028,7 +994,7 @@ passes a tuple as that single argument.
 
 # Example usage:
 ```jldoctest
-julia> map(splat(+), zip(1:3,4:6))
+julia> map(Base.splat(+), zip(1:3,4:6))
 3-element Array{Int64,1}:
  5
  7

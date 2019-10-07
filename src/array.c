@@ -64,7 +64,7 @@ static jl_array_t *_new_array_(jl_value_t *atype, uint32_t ndims, size_t *dims,
         size_t di = dims[i];
         wideint_t prod = (wideint_t)nel * (wideint_t)di;
         if (prod > (wideint_t) MAXINTVAL || di > MAXINTVAL)
-            jl_error("invalid Array dimensions");
+            jl_exceptionf(jl_argumenterror_type, "invalid Array dimensions");
         nel = prod;
     }
     assert(atype == NULL || isunion == jl_is_uniontype(jl_tparam0(atype)));
@@ -156,6 +156,9 @@ static inline jl_array_t *_new_array(jl_value_t *atype, uint32_t ndims, size_t *
         elsz = sizeof(void*);
         al = elsz;
     }
+    else {
+        elsz = LLT_ALIGN(elsz, al);
+    }
 
     return _new_array_(atype, ndims, dims, isunboxed, isunion, elsz);
 }
@@ -207,7 +210,7 @@ JL_DLLEXPORT jl_array_t *jl_reshape_array(jl_value_t *atype, jl_array_t *data,
     int isboxed = !jl_islayout_inline(eltype, &elsz, &align);
     assert(isboxed == data->flags.ptrarray);
     if (!isboxed) {
-        a->elsize = elsz;
+        a->elsize = LLT_ALIGN(elsz, align);
         jl_value_t *ownerty = jl_typeof(owner);
         size_t oldelsz = 0, oldalign = 0;
         if (ownerty == (jl_value_t*)jl_string_type) {
@@ -252,7 +255,7 @@ JL_DLLEXPORT jl_array_t *jl_reshape_array(jl_value_t *atype, jl_array_t *data,
             adims[i] = dims[i];
             prod = (wideint_t)l * (wideint_t)adims[i];
             if (prod > (wideint_t) MAXINTVAL)
-                jl_error("invalid Array dimensions");
+                jl_exceptionf(jl_argumenterror_type, "invalid Array dimensions");
             l = prod;
         }
 #ifdef STORE_ARRAY_LEN
@@ -323,7 +326,7 @@ JL_DLLEXPORT jl_array_t *jl_ptr_to_array_1d(jl_value_t *atype, void *data,
 #ifdef STORE_ARRAY_LEN
     a->length = nel;
 #endif
-    a->elsize = elsz;
+    a->elsize = LLT_ALIGN(elsz, align);
     a->flags.ptrarray = !isunboxed;
     a->flags.ndims = 1;
     a->flags.isshared = 1;
@@ -356,7 +359,7 @@ JL_DLLEXPORT jl_array_t *jl_ptr_to_array(jl_value_t *atype, void *data,
     for (size_t i = 0; i < ndims; i++) {
         prod = (wideint_t)nel * (wideint_t)dims[i];
         if (prod > (wideint_t) MAXINTVAL)
-            jl_error("invalid Array dimensions");
+            jl_exceptionf(jl_argumenterror_type, "invalid Array dimensions");
         nel = prod;
     }
     if (__unlikely(ndims == 1))
@@ -389,7 +392,7 @@ JL_DLLEXPORT jl_array_t *jl_ptr_to_array(jl_value_t *atype, void *data,
 #ifdef STORE_ARRAY_LEN
     a->length = nel;
 #endif
-    a->elsize = elsz;
+    a->elsize = LLT_ALIGN(elsz, align);
     a->flags.ptrarray = !isunboxed;
     a->flags.ndims = ndims;
     a->offset = 0;
@@ -471,6 +474,8 @@ JL_DLLEXPORT jl_value_t *jl_array_to_string(jl_array_t *a)
 JL_DLLEXPORT jl_value_t *jl_pchar_to_string(const char *str, size_t len)
 {
     size_t sz = sizeof(size_t) + len + 1; // add space for trailing \nul protector and size
+    if (sz < len) // overflow
+        jl_throw(jl_memory_exception);
     if (len == 0)
         return jl_an_empty_string;
     jl_value_t *s = jl_gc_alloc_(jl_get_ptls_states(), sz, jl_string_type); // force inlining
@@ -483,6 +488,8 @@ JL_DLLEXPORT jl_value_t *jl_pchar_to_string(const char *str, size_t len)
 JL_DLLEXPORT jl_value_t *jl_alloc_string(size_t len)
 {
     size_t sz = sizeof(size_t) + len + 1; // add space for trailing \nul protector and size
+    if (sz < len) // overflow
+        jl_throw(jl_memory_exception);
     if (len == 0)
         return jl_an_empty_string;
     jl_value_t *s = jl_gc_alloc_(jl_get_ptls_states(), sz, jl_string_type); // force inlining
@@ -588,10 +595,9 @@ JL_DLLEXPORT void jl_arrayset(jl_array_t *a JL_ROOTING_ARGUMENT, jl_value_t *rhs
 JL_DLLEXPORT void jl_arrayunset(jl_array_t *a, size_t i)
 {
     if (i >= jl_array_len(a))
-        jl_bounds_error_int((jl_value_t*)a, i+1);
-    char *ptail = (char*)a->data + i*a->elsize;
+        jl_bounds_error_int((jl_value_t*)a, i + 1);
     if (a->flags.ptrarray)
-        memset(ptail, 0, a->elsize);
+        ((jl_value_t**)a->data)[i] = NULL;
 }
 
 // at this size and bigger, allocate resized array data with malloc

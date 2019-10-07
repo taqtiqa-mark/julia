@@ -178,7 +178,7 @@ Julia function. The arguments to [`@cfunction`](@ref) are:
 !!! note
     Currently, only the platform-default C calling convention is supported. This means that
     `@cfunction`-generated pointers cannot be used in calls where WINAPI expects `stdcall`
-    function on 32-bit windows, but can be used on WIN64 (where `stdcall` is unified with the
+    function on 32-bit Windows, but can be used on WIN64 (where `stdcall` is unified with the
     C calling convention).
 
 A classic example is the standard C library `qsort` function, declared as:
@@ -358,7 +358,7 @@ an `Int` in Julia).
 | C name                                                  | Fortran name             | Standard Julia Alias | Julia Base Type                                                                                                |
 |:------------------------------------------------------- |:------------------------ |:-------------------- |:-------------------------------------------------------------------------------------------------------------- |
 | `unsigned char`                                         | `CHARACTER`              | `Cuchar`             | `UInt8`                                                                                                        |
-| `bool` (only in C++)                                    |                          | `Cuchar`             | `UInt8`                                                                                                        |
+| `bool` (_Bool in C99+)                                  |                          | `Cuchar`             | `UInt8`                                                                                                        |
 | `short`                                                 | `INTEGER*2`, `LOGICAL*2` | `Cshort`             | `Int16`                                                                                                        |
 | `unsigned short`                                        |                          | `Cushort`            | `UInt16`                                                                                                       |
 | `int`, `BOOL` (C, typical)                              | `INTEGER*4`, `LOGICAL*4` | `Cint`               | `Int32`                                                                                                        |
@@ -463,7 +463,7 @@ checks and is only meant to improve readability of the call.
     ```julia
     str1 = "foo"
     str2 = "bar"
-    ccall(:test, Void, (Ptr{UInt8}, Ptr{UInt8}, Csize_t, Csize_t),
+    ccall(:test, Cvoid, (Ptr{UInt8}, Ptr{UInt8}, Csize_t, Csize_t),
                         str1, str2, sizeof(str1), sizeof(str2))
     ```
 

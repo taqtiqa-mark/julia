@@ -168,11 +168,13 @@ public:
 
     jl_method_instance_t *lookupLinfo(size_t pointer)
     {
-        auto linfo = linfomap.lower_bound(pointer);
-        if (linfo != linfomap.end() && pointer < linfo->first + linfo->second.first)
-            return linfo->second.second;
-        else
-            return NULL;
+        uv_rwlock_rdlock(&threadsafe);
+        auto region = linfomap.lower_bound(pointer);
+        jl_method_instance_t *linfo = NULL;
+        if (region != linfomap.end() && pointer < region->first + region->second.first)
+            linfo = region->second.second;
+        uv_rwlock_rdunlock(&threadsafe);
+        return linfo;
     }
 
     virtual void NotifyObjectEmitted(const object::ObjectFile &obj,
@@ -190,7 +192,6 @@ public:
         // This function modify codeinst->fptr in GC safe region.
         // This should be fine since the GC won't scan this field.
         int8_t gc_state = jl_gc_safe_enter(ptls);
-        uv_rwlock_wrlock(&threadsafe);
         object::section_iterator Section = debugObj.section_begin();
         object::section_iterator EndSection = debugObj.section_end();
 
@@ -324,8 +325,6 @@ public:
 #endif // defined(_OS_X86_64_)
 #endif // defined(_OS_WINDOWS_)
 
-        std::vector<std::pair<jl_code_instance_t*, uintptr_t>> def_spec;
-        std::vector<std::pair<jl_code_instance_t*, uintptr_t>> def_invoke;
         auto symbols = object::computeSymbolSizes(debugObj);
         bool first = true;
         for (const auto &sym_size : symbols) {
@@ -366,21 +365,8 @@ public:
             if (linfo_it != ncode_in_flight.end()) {
                 codeinst = linfo_it->second;
                 ncode_in_flight.erase(linfo_it);
-                const char *F = codeinst->functionObjectsDecls.functionObject;
-                const char *specF = codeinst->functionObjectsDecls.specFunctionObject;
-                if (codeinst->invoke == NULL) {
-                    if (specF && sName.equals(specF)) {
-                        def_spec.push_back({codeinst, Addr});
-                        if (!strcmp(F, "jl_fptr_args"))
-                            def_invoke.push_back({codeinst, (uintptr_t)&jl_fptr_args});
-                        else if (!strcmp(F, "jl_fptr_sparam"))
-                            def_invoke.push_back({codeinst, (uintptr_t)&jl_fptr_sparam});
-                    }
-                    else if (sName.equals(F)) {
-                        def_invoke.push_back({codeinst, Addr});
-                    }
-                }
             }
+            uv_rwlock_wrlock(&threadsafe);
             if (codeinst)
                 linfomap[Addr] = std::make_pair(Size, codeinst->def);
             if (first) {
@@ -391,14 +377,9 @@ public:
                     };
                 objectmap[SectionLoadAddr] = tmp;
                 first = false;
-           }
-       }
-       // now process these in order, so we ensure the closure values are updated before enabling the invoke pointer
-       for (auto &def : def_spec)
-           def.first->specptr.fptr = (void*)def.second;
-       for (auto &def : def_invoke)
-           def.first->invoke = (jl_callptr_t)def.second;
-        uv_rwlock_wrunlock(&threadsafe);
+            }
+            uv_rwlock_wrunlock(&threadsafe);
+        }
         jl_gc_safe_leave(ptls, gc_state);
     }
 
@@ -593,7 +574,14 @@ static debug_link_info getDebuglink(const object::ObjectFile &Obj)
         StringRef sName;
         if (!Section.getName(sName) && sName == ".gnu_debuglink") {
             StringRef Contents;
-            if (!Section.getContents(Contents)) {
+#if JL_LLVM_VERSION >= 90000
+            auto found = Section.getContents();
+            if (found)
+                Contents = *found;
+#else
+            bool found = !Section.getContents(Contents);
+#endif
+            if (found) {
                 size_t length = Contents.find('\0');
                 info.filename = Contents.substr(0, length);
                 info.crc32 = *(const uint32_t*)Contents.substr(LLT_ALIGN(length + 1, 4), 4).data();
@@ -1224,7 +1212,7 @@ JL_DLLEXPORT uint64_t jl_get_section_start(uint64_t fptr)
 }
 
 // Set *name and *filename to either NULL or malloc'd string
-int jl_getFunctionInfo(jl_frame_t **frames_out, size_t pointer, int skipC, int noInline)
+int jl_getFunctionInfo(jl_frame_t **frames_out, size_t pointer, int skipC, int noInline) JL_NOTSAFEPOINT
 {
     // This function is not allowed to reference any TLS variables if noInline
     // since it can be called from an unmanaged thread on OSX.
@@ -1245,7 +1233,7 @@ int jl_getFunctionInfo(jl_frame_t **frames_out, size_t pointer, int skipC, int n
     return jl_getDylibFunctionInfo(frames_out, pointer, skipC, noInline);
 }
 
-extern "C" jl_method_instance_t *jl_gdblookuplinfo(void *p)
+extern "C" jl_method_instance_t *jl_gdblookuplinfo(void *p) JL_NOTSAFEPOINT
 {
     return jl_jit_events->lookupLinfo((size_t)p);
 }

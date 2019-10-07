@@ -72,7 +72,7 @@ static void *const _tags[] = {
          // other special values
          &jl_emptysvec, &jl_emptytuple, &jl_false, &jl_true, &jl_nothing, &jl_an_empty_string,
          &jl_module_init_order, &jl_core_module, &jl_base_module, &jl_main_module, &jl_top_module,
-         &jl_typeinf_func, &jl_type_type_mt,
+         &jl_typeinf_func, &jl_type_type_mt, &jl_nonfunction_mt,
          // some Core.Builtin Functions that we want to be able to reference:
          &jl_builtin_throw, &jl_builtin_is, &jl_builtin_typeof, &jl_builtin_sizeof,
          &jl_builtin_issubtype, &jl_builtin_isa, &jl_builtin_typeassert, &jl_builtin__apply,
@@ -207,14 +207,12 @@ static void jl_load_sysimg_so(void)
         jl_dlsym(jl_sysimg_handle, "jl_sysimg_gvars_offsets", (void **)&sysimg_gvars_offsets, 1);
         sysimg_gvars_offsets += 1;
         assert(sysimg_fptrs.base);
-#ifdef JULIA_ENABLE_THREADING
         uintptr_t *tls_getter_slot;
         jl_dlsym(jl_sysimg_handle, "jl_get_ptls_states_slot", (void **)&tls_getter_slot, 1);
         *tls_getter_slot = (uintptr_t)jl_get_ptls_states_getter();
         size_t *tls_offset_idx;
         jl_dlsym(jl_sysimg_handle, "jl_tls_offset", (void **)&tls_offset_idx, 1);
         *tls_offset_idx = (uintptr_t)(jl_tls_offset == -1 ? 0 : jl_tls_offset);
-#endif
 
 #ifdef _OS_WINDOWS_
         sysimage_base = (intptr_t)jl_sysimg_handle;
@@ -891,7 +889,7 @@ static void jl_write_gv_ints(jl_serializer_state *s)
 
 static inline uint32_t load_uint32(uintptr_t *base)
 {
-    uint32_t v = **(uint32_t**)base;
+    uint32_t v = jl_load_unaligned_i32((void*)*base);
     *base += 4;
     return v;
 }
@@ -985,7 +983,7 @@ static inline uintptr_t get_item_for_reloc(jl_serializer_state *s, uintptr_t bas
         offset -= NBOX_C;
         if (offset < 256)
             return (uintptr_t)jl_box_uint8(offset);
-        offset -= 256;
+        // offset -= 256;
         assert(0 && "corrupt relocation item id");
     case BuiltinFunctionRef:
         assert(offset < sizeof(id_to_fptrs) / sizeof(*id_to_fptrs) && "unknown function pointer ID");
@@ -1271,8 +1269,8 @@ static void jl_cleanup_serializer2(void);
 
 static void jl_save_system_image_to_stream(ios_t *f)
 {
-    jl_gc_collect(1); // full
-    jl_gc_collect(0); // incremental (sweep finalizers)
+    jl_gc_collect(JL_GC_FULL);
+    jl_gc_collect(JL_GC_INCREMENTAL);   // sweep finalizers
     JL_TIMING(SYSIMG_DUMP);
     int en = jl_gc_enable(0);
     jl_init_serializer2(1);
@@ -1622,18 +1620,15 @@ static void jl_init_serializer2(int for_serialize)
         htable_new(&fptr_to_id, sizeof(id_to_fptrs) / sizeof(*id_to_fptrs));
         htable_new(&backref_table, 0);
         arraylist_new(&builtin_typenames, 0);
-    }
-    else {
-        arraylist_new(&deser_sym, 0);
-    }
-    nsym_tag = 0;
-
-    if (for_serialize) {
         uintptr_t i;
         for (i = 0; id_to_fptrs[i] != NULL; i++) {
             ptrhash_put(&fptr_to_id, (void*)(uintptr_t)id_to_fptrs[i], (void*)(i + 2));
         }
     }
+    else {
+        arraylist_new(&deser_sym, 0);
+    }
+    nsym_tag = 0;
 }
 
 static void jl_cleanup_serializer2(void)

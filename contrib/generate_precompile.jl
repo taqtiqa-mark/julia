@@ -1,9 +1,6 @@
 # This file is a part of Julia. License is MIT: https://julialang.org/license
 
-if !isempty(ARGS)
-    ARGS[1] == "0" && exit(0)
-end
-
+if isempty(ARGS) || ARGS[1] !== "0"
 # Prevent this from being put into the Main namespace
 @eval Module() begin
 if !isdefined(Base, :uv_eventloop)
@@ -137,14 +134,9 @@ function generate_precompile_statements()
         # Extract the precompile statements from stderr
         statements = Set{String}()
         for statement in eachline(precompile_file_h)
+            # Main should be completely clean
             occursin("Main.", statement) && continue
             push!(statements, statement)
-        end
-
-        if have_repl
-            # Seems like a reasonable number right now, adjust as needed
-            # comment out if debugging script
-            @assert length(statements) > 700
         end
 
         # Create a staging area where all the loaded packages are available
@@ -156,18 +148,23 @@ function generate_precompile_statements()
         end
 
         # Execute the collected precompile statements
+        n_succeeded = 0
         include_time = @elapsed for statement in sort(collect(statements))
             # println(statement)
-            # Work around #28808
-            occursin("\"YYYY-mm-dd\\THH:MM:SS\"", statement) && continue
-            statement == "precompile(Tuple{typeof(Base.show), Base.IOContext{Base.TTY}, Type{Vararg{Any, N} where N}})" && continue
             try
                 Base.include_string(PrecompileStagingArea, statement)
+                n_succeeded += 1
             catch
-                @error "Failed to precompile $statement"
-                rethrow()
+                # See #28808
+                # @error "Failed to precompile $statement"
             end
         end
+        if have_repl
+            # Seems like a reasonable number right now, adjust as needed
+            # comment out if debugging script
+            @assert n_succeeded > 3500
+        end
+
         print(" $(length(statements)) generated in ")
         tot_time = time() - start_time
         Base.time_print(tot_time * 10^9)
@@ -180,3 +177,4 @@ end
 generate_precompile_statements()
 
 end # @eval
+end

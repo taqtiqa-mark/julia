@@ -1,13 +1,19 @@
-Julia v1.3 Release Notes
+Julia v1.4 Release Notes
 ========================
 
 New language features
 ---------------------
 
+* Structs with all isbits and isbitsunion fields are now stored inline in arrays ([#32448]).
+
+* `import` now allows quoted symbols, e.g. `import Base.:+` ([#33158]).
 
 Language changes
 ----------------
 
+* Calling `show` or `repr` on an `undef`/`UndefInitializer()` array initializer now shows valid Julia code ([#33211]).
+
+* Calling `show` or `repr` on a 0-dimensional `AbstractArray` now shows valid code for creating an equivalent 0-dimensional array, instead of only showing the contained value. ([#33206])
 
 Multi-threading changes
 -----------------------
@@ -15,41 +21,65 @@ Multi-threading changes
 
 Build system changes
 --------------------
-
+* Windows build installer has switched to Inno Setup. Installer command line parameters have thus changed. For example, to extract the installer to a specific directory, the command line parameter is now `/DIR=x:\dirname`. Use `julia-installer.exe /?` to list all new command line parameters.
 
 New library functions
 ---------------------
 
-* New `findall(pattern, string)` method where `pattern` is a string or regex ([#31834]).
+* The `splitpath` function now accepts any `AbstractString` whereas previously it only accepted paths of type `String` ([#33012]).
+* The `tempname` function now takes an optional `parent::AbstractString` argument to give it a directory in which to attempt to produce a temporary path name ([#33090]).
+* The `tempname` function now takes a `cleanup::Bool` keyword argument defaulting to `true`, which causes the process to try to ensure that any file or directory at the path returned by `tempname` is deleted upon process exit ([#33090]).
+* The `readdir` function now takes a `join::Bool` keyword argument defaulting to `false`, which when set causes `readdir` to join its directory argument with each listed name ([#33113]).
+* The new `only(x)` function returns the one-and-only element of a collection `x`, and throws an `ArgumentError` if `x` contains zero or multiple elements. ([#33129])
+
 
 Standard library changes
 ------------------------
 
-* `Regex` can now be multiplied (`*`) and exponentiated (`^`), like strings ([#23422]).
-* Cmd interpolation (`` `$(x::Cmd) a b c` `` where) now propagates `x`'s process flags
-  (environment, flags, working directory, etc) if `x` is the first interpolant and errors
-  otherwise ([#24353]).
+* The methods of `mktemp` and `mktempdir` which take a function body to pass temporary paths to no longer throw errors if the path is already deleted when the function body returns ([#33091]).
+
+* `div` now accepts a rounding mode as the third argument, consistent with the corresponding argument to `rem`. Support for rounding division, by passing one of the RoundNearest modes to this function, was added. For future compatibility, library authors should now extend this function, rather than extending the two-argument `fld`/`cld`/`div` directly. ([#33040])
+
+* Verbose `display` of `Char` (`text/plain` output) now shows the codepoint value in standard-conforming `"U+XXXX"` format ([#33291]).
+
+
+#### Libdl
 
 #### LinearAlgebra
 
-* The BLAS submodule no longer exports `dot`, which conflicts with that in LinearAlgebra ([#31838]).
-* `diagm` and `spdiagm` now accept optional `m,n` initial arguments to specify a size ([#31654]).
+* `qr` and `qr!` functions support `blocksize` keyword argument ([#33053]).
+
+* `dot` now admits a 3-argument method `dot(x, A, y)` to compute generalized dot products `dot(x, A*y)`, but without computing and storing the intermediate result `A*y` ([#32739]).
+
+* `ldlt` and non-pivoted `lu` now throw a new `ZeroPivotException` type ([#33372]).
+
+#### Random
+
+* `AbstractRNG`s now behave like scalars when used in broadcasting ([#33213]).
+
+* Products involving sparse arrays now allow more general sparse `eltype`s, such as `StaticArrays` ([#33205])
+
+* The performance of `rand(::Tuple)` is improved in some cases ([#32208]). As a consequence, the
+  stream of generated values produced for a given seed has changed.
 
 #### SparseArrays
 
-
 #### Dates
-
 
 #### Statistics
 
-* `mean` now accepts both a function argument and a `dims` keyword ([#31576]).
 
-#### Miscellaneous
+#### Sockets
 
-* `foldr` and `mapfoldr` now work on any iterator that supports `Iterators.reverse`, not just arrays ([#31781]).
+
+Deprecated or removed
+---------------------
+
 
 External dependencies
+---------------------
+
+Tooling Improvements
 ---------------------
 
 

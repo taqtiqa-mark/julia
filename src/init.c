@@ -69,20 +69,19 @@ void jl_init_stack_limits(int ismaster, void **stack_lo, void **stack_hi)
 #ifdef _OS_WINDOWS_
     (void)ismaster;
     // https://en.wikipedia.org/wiki/Win32_Thread_Information_Block
-#ifdef _P64
+#  ifdef _P64
     *stack_hi = (void**)__readgsqword(0x08); // Stack Base / Bottom of stack (high address)
     *stack_lo = (void**)__readgsqword(0x10); // Stack Limit / Ceiling of stack (low address)
-#else
+#  else // !_P64
     *stack_hi = (void**)__readfsdword(0x04); // Stack Base / Bottom of stack (high address)
     *stack_lo = (void**)__readfsdword(0x08); // Stack Limit / Ceiling of stack (low address)
-#endif
-#else
-#  ifdef JULIA_ENABLE_THREADING
+#  endif // _P64
+#else // !_OS_WINDOWS_
     // Only use pthread_*_np functions to get stack address for non-master
     // threads since it seems to return bogus values for master thread on Linux
     // and possibly OSX.
     if (!ismaster) {
-#    if defined(_OS_LINUX_)
+#  if defined(_OS_LINUX_)
         pthread_attr_t attr;
         pthread_getattr_np(pthread_self(), &attr);
         void *stackaddr;
@@ -90,18 +89,18 @@ void jl_init_stack_limits(int ismaster, void **stack_lo, void **stack_hi)
         pthread_attr_getstack(&attr, &stackaddr, &stacksize);
         pthread_attr_destroy(&attr);
         *stack_lo = (void*)stackaddr;
-        *stack_hi = (void*)((char*)stackaddr + stacksize);
+        *stack_hi = (void*)&stacksize;
         return;
-#    elif defined(_OS_DARWIN_)
+#  elif defined(_OS_DARWIN_)
         extern void *pthread_get_stackaddr_np(pthread_t thread);
         extern size_t pthread_get_stacksize_np(pthread_t thread);
         pthread_t thread = pthread_self();
         void *stackaddr = pthread_get_stackaddr_np(thread);
         size_t stacksize = pthread_get_stacksize_np(thread);
-        *stack_lo = (char*)stackaddr;
-        *stack_hi = (void*)((char*)stackaddr + stacksize);
+        *stack_lo = (void*)stackaddr;
+        *stack_hi = (void*)&stacksize;
         return;
-#    elif defined(_OS_FREEBSD_)
+#  elif defined(_OS_FREEBSD_)
         pthread_attr_t attr;
         pthread_attr_init(&attr);
         pthread_attr_get_np(pthread_self(), &attr);
@@ -109,21 +108,18 @@ void jl_init_stack_limits(int ismaster, void **stack_lo, void **stack_hi)
         size_t stacksize;
         pthread_attr_getstack(&attr, &stackaddr, &stacksize);
         pthread_attr_destroy(&attr);
-        *stack_lo = (char*)stackaddr;
-        *stack_hi = (void*)((char*)stackaddr + stacksize);
+        *stack_lo = (void*)stackaddr;
+        *stack_hi = (void*)&stacksize;
         return;
-#    else
-#      warning "Getting precise stack size for thread is not supported."
-#    endif
-    }
 #  else
-    (void)ismaster;
+#      warning "Getting precise stack size for thread is not supported."
 #  endif
+    }
     struct rlimit rl;
     getrlimit(RLIMIT_STACK, &rl);
-    size_t stack_size = rl.rlim_cur;
-    *stack_hi = (void*)&stack_size;
-    *stack_lo = (void*)((char*)*stack_hi - stack_size);
+    size_t stacksize = rl.rlim_cur;
+    *stack_hi = (void*)&stacksize;
+    *stack_lo = (void*)((char*)*stack_hi - stacksize);
 #endif
 }
 
@@ -160,11 +156,11 @@ static void jl_uv_exitcleanup_add(uv_handle_t *handle, struct uv_shutdown_queue 
     struct uv_shutdown_queue_item *item = (struct uv_shutdown_queue_item*)malloc(sizeof(struct uv_shutdown_queue_item));
     item->h = handle;
     item->next = NULL;
-    JL_UV_LOCK();
-    if (queue->last) queue->last->next = item;
-    if (!queue->first) queue->first = item;
+    if (queue->last)
+        queue->last->next = item;
+    if (!queue->first)
+        queue->first = item;
     queue->last = item;
-    JL_UV_UNLOCK();
 }
 
 static void jl_uv_exitcleanup_walk(uv_handle_t *handle, void *arg)
@@ -297,8 +293,8 @@ JL_DLLEXPORT void jl_atexit_hook(int exitcode)
 
     // force libuv to spin until everything has finished closing
     loop->stop_flag = 0;
-    JL_UV_UNLOCK();
     while (uv_run(loop, UV_RUN_DEFAULT)) { }
+    JL_UV_UNLOCK();
 
     // TODO: Destroy threads
 
@@ -397,6 +393,7 @@ static void *init_stdio_handle(const char *stdio, uv_os_fd_t fd, int readable)
         {
             int nullfd;
             nullfd = open("/dev/null", O_RDWR, S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH /* 0666 */);
+            assert(nullfd != -1);
             dup2(nullfd, fd);
             close(nullfd);
         }
@@ -627,11 +624,6 @@ static void jl_resolve_sysimg_location(JL_IMAGE_SEARCH rel)
         jl_options.outputbc = abspath(jl_options.outputbc, 0);
     if (jl_options.machine_file)
         jl_options.machine_file = abspath(jl_options.machine_file, 0);
-    if (jl_options.project
-            && strcmp(jl_options.project, "@.") != 0
-            && strcmp(jl_options.project, "@") != 0
-            && strcmp(jl_options.project, "") != 0)
-        jl_options.project = abspath(jl_options.project, 0);
     if (jl_options.output_code_coverage)
         jl_options.output_code_coverage = absformat(jl_options.output_code_coverage);
 
@@ -655,10 +647,8 @@ static void jl_set_io_wait(int v)
 void _julia_init(JL_IMAGE_SEARCH rel)
 {
     jl_init_timing();
-#ifdef JULIA_ENABLE_THREADING
     // Make sure we finalize the tls callback before starting any threads.
     jl_get_ptls_states_getter();
-#endif
     jl_ptls_t ptls = jl_get_ptls_states();
     (void)ptls; assert(ptls); // make sure early that we have initialized ptls
     jl_safepoint_init();
@@ -746,10 +736,11 @@ void _julia_init(JL_IMAGE_SEARCH rel)
         jl_error("cannot generate code-coverage or track allocation information while generating a .o or .bc output file");
     }
 
+    jl_gc_init();
+
     jl_init_threading();
     jl_init_intrinsic_properties();
 
-    jl_gc_init();
     jl_gc_enable(0);
 
     jl_resolve_sysimg_location(rel);
@@ -794,6 +785,11 @@ void _julia_init(JL_IMAGE_SEARCH rel)
     // it does "using Base" if Base is available.
     if (jl_base_module != NULL) {
         jl_add_standard_imports(jl_main_module);
+        jl_value_t *maininclude = jl_get_global(jl_base_module, jl_symbol("MainInclude"));
+        if (maininclude && jl_is_module(maininclude)) {
+            jl_module_import(jl_main_module, (jl_module_t*)maininclude, jl_symbol("include"));
+            jl_module_import(jl_main_module, (jl_module_t*)maininclude, jl_symbol("eval"));
+        }
         // Do initialization needed before starting child threads
         jl_value_t *f = jl_get_global(jl_base_module, jl_symbol("__preinit_threads__"));
         if (f) {

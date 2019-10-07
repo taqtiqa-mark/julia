@@ -43,10 +43,18 @@ function error(s::Vararg{Any,N}) where {N}
 end
 
 """
-    rethrow([e])
+    rethrow()
 
-Throw an object without changing the current exception backtrace. The default argument is
-the current exception (if called within a `catch` block).
+Rethrow the current exception from within a `catch` block. The rethrown
+exception will continue propagation as if it had not been caught.
+
+!!! note
+    The alternative form `rethrow(e)` allows you to associate an alternative
+    exception object `e` with the current backtrace. However this misrepresents
+    the program state at the time of the error so you're encouraged to instead
+    throw a new exception using `throw(e)`. In Julia 1.1 and above, using
+    `throw(e)` will preserve the root cause exception on the stack, as
+    described in [`catch_stack`](@ref).
 """
 rethrow() = ccall(:jl_rethrow, Bottom, ())
 rethrow(e) = ccall(:jl_rethrow_other, Bottom, (Any,), e)
@@ -77,7 +85,19 @@ function _reformat_bt(bt, bt2)
     ret
 end
 
-function backtrace end
+"""
+    backtrace()
+
+Get a backtrace object for the current program point.
+"""
+function backtrace()
+    @_noinline_meta
+    # skip frame for backtrace(). Note that for this to work properly,
+    # backtrace() itself must not be interpreted nor inlined.
+    skip = 1
+    bt1, bt2 = ccall(:jl_backtrace_from_here, Any, (Cint,Cint), false, skip)
+    _reformat_bt(bt1, bt2)
+end
 
 """
     catch_backtrace()

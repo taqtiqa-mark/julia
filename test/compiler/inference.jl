@@ -1460,6 +1460,21 @@ f_pure_add() = (1 + 1 == 2) ? true : "FAIL"
 @test Core.Compiler.getfield_tfunc(Const(Vector{Int}), Const(:mutable)) == Const(true)
 @test Core.Compiler.getfield_tfunc(DataType, Const(:mutable)) == Bool
 
+# getfield on abstract named tuples. issue #32698
+import Core.Compiler.getfield_tfunc
+@test getfield_tfunc(NamedTuple{(:id, :y), T} where {T <: Tuple{Int, Union{Float64, Missing}}},
+                     Const(:y)) == Union{Missing, Float64}
+@test getfield_tfunc(NamedTuple{(:id, :y), T} where {T <: Tuple{Int, Union{Float64, Missing}}},
+                     Const(2)) == Union{Missing, Float64}
+@test getfield_tfunc(NamedTuple{(:id, :y), T} where {T <: Tuple{Int, Union{Float64, Missing}}},
+                     Symbol) == Union{Missing, Float64, Int}
+@test getfield_tfunc(NamedTuple{<:Any, T} where {T <: Tuple{Int, Union{Float64, Missing}}},
+                     Symbol) == Union{Missing, Float64, Int}
+@test getfield_tfunc(NamedTuple{<:Any, T} where {T <: Tuple{Int, Union{Float64, Missing}}},
+                     Int) == Union{Missing, Float64, Int}
+@test getfield_tfunc(NamedTuple{<:Any, T} where {T <: Tuple{Int, Union{Float64, Missing}}},
+                     Const(:x)) == Union{Missing, Float64, Int}
+
 struct Foo_22708
     x::Ptr{Foo_22708}
 end
@@ -1933,6 +1948,12 @@ Base.iterate(::Iterator27434, ::Any) = nothing
 @test @inferred(splat27434(Iterator27434(1, 2, 3))) == (1, 2, 3)
 @test @inferred((1, 2, 3) == (1, 2, 3))
 @test Core.Compiler.return_type(splat27434, Tuple{typeof(Iterators.repeated(1))}) == Union{}
+
+# issue #32465
+let rt = Base.return_types(splat27434, (NamedTuple{(:x,), Tuple{T}} where T,))
+    @test rt == Any[Tuple{Any}]
+    @test !Base.has_free_typevars(rt[1])
+end
 
 # issue #27078
 f27078(T::Type{S}) where {S} = isa(T, UnionAll) ? f27078(T.body) : T
@@ -2421,3 +2442,6 @@ f31974(n::Int) = f31974(1:n)
 # This query hangs if type inference improperly attempts to const prop
 # call cycles.
 @test code_typed(f31974, Tuple{Int}) !== nothing
+
+f_overly_abstract_complex() = Complex(Ref{Number}(1)[])
+@test Base.return_types(f_overly_abstract_complex, Tuple{}) == [Complex]

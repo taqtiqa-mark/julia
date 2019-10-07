@@ -161,6 +161,7 @@ Base.isdispatchtuple
 Base.isimmutable
 Base.isabstracttype
 Base.isprimitivetype
+Base.issingletontype
 Base.isstructtype
 Base.nameof(::DataType)
 Base.fieldnames
@@ -250,6 +251,7 @@ Base.@nospecialize
 Base.@specialize
 Base.gensym
 Base.@gensym
+var"name"
 Base.@goto
 Base.@label
 Base.@simd
@@ -266,6 +268,7 @@ Base.missing
 Base.coalesce
 Base.ismissing
 Base.skipmissing
+Base.nonmissingtype
 ```
 
 ## System
@@ -392,6 +395,7 @@ Base.functionloc(::Method)
 Base.GC.gc
 Base.GC.enable
 Base.GC.@preserve
+Base.GC.safepoint
 Meta.lower
 Meta.@lower
 Meta.parse(::AbstractString, ::Int)

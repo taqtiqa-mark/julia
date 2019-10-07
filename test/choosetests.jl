@@ -47,7 +47,7 @@ function choosetests(choices = [])
         "floatapprox", "stdlib", "reflection", "regex", "float16",
         "combinatorics", "sysinfo", "env", "rounding", "ranges", "mod2pi",
         "euler", "show", "client",
-        "errorshow", "sets", "goto", "llvmcall", "llvmcall2", "grisu",
+        "errorshow", "sets", "goto", "llvmcall", "llvmcall2", "ryu",
         "some", "meta", "stacktraces", "docs",
         "misc", "threads", "stress",
         "enums", "cmdlineargs", "int", "interpreter",
@@ -108,7 +108,7 @@ function choosetests(choices = [])
     end
 
     compilertests = ["compiler/inference", "compiler/validation", "compiler/ssair", "compiler/irpasses",
-                     "compiler/codegen", "compiler/inline"]
+                     "compiler/codegen", "compiler/inline", "compiler/contextual"]
 
     if "compiler" in skip_tests
         filter!(x -> (x != "compiler" && !(x in compilertests)), tests)
